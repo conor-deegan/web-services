@@ -86,6 +86,36 @@ fn parse_domain_name(buf: &[u8], start: usize) -> Result<String, &'static str> {
     Ok(domain_name)
 }
 
+// Send a DNS response with NXDOMAIN (non-existent domain) to the client.
+async fn send_nxdomain_response(
+    transaction_id: [u8; 2],
+    request: &[u8],
+    request_len: usize,
+    addr: &std::net::SocketAddr,
+    socket: &tokio::net::UdpSocket,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut response = Vec::new();
+
+    // Transaction ID
+    response.extend_from_slice(&transaction_id);
+
+    // Flags: Response, Opcode 0 (Standard Query), Authoritative Answer False, Truncated False,
+    // Recursion Desired True, Recursion Available False, Z Reserved, Answer Authenticated False,
+    // Non-authenticated data Acceptable, Reply Code NXDOMAIN (3)
+    response.extend_from_slice(&[0x81, 0x83]); // Note: 0x83 indicates NXDOMAIN
+
+    // Questions: 1, Answer RRs: 0, Authority RRs: 0, Additional RRs: 0
+    response.extend_from_slice(&[0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+
+    // Repeat the question section from the request
+    response.extend_from_slice(&request[12..request_len]);
+
+    // Sending the NXDOMAIN response
+    socket.send_to(&response, addr).await?;
+
+    Ok(())
+}
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -94,12 +124,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Bind the server to UDP port 53 and listens for incoming DNS queries.
     let socket = UdpSocket::bind("0.0.0.0:53").await?;
-    println!("Listening on {}", socket.local_addr()?);
+    println!("DNS Server listening on {}", socket.local_addr()?);
 
     let mut buf = [0u8; 512]; // Buffer to store incoming DNS queries.
 
     loop {
-        let (len, addr) = socket.recv_from(&mut buf).await?;
+        let (_, addr) = socket.recv_from(&mut buf).await?;
         println!("Received query from {}", addr);
 
         match parse_domain_name(&buf, 12) { // Start parsing after the header
@@ -112,29 +142,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if let Err(e) = socket.send_to(&response, &addr).await {
                             eprintln!("Failed to send response: {}", e);
                         } else {
-                            println!("Sent response to {}", addr);
+                            println!("Sent response to {} for domain {} and ip {}", addr, domain, ip_address);
                         }
                     },
                     None => {
-                        // Constructing NXDOMAIN response
                         let transaction_id = [buf[0], buf[1]];
-                        let mut response = Vec::new();
-
-                        // Transaction ID
-                        response.extend_from_slice(&transaction_id);
-
-                        // Flags: Response, Opcode 0 (Standard Query), Authoritative Answer False, Truncated False,
-                        // Recursion Desired True, Recursion Available False, Z Reserved, Answer Authenticated False,
-                        // Non-authenticated data Acceptable, Reply Code NXDOMAIN (3)
-                        response.extend_from_slice(&[0x81, 0x83]); // Note: 0x83 indicates NXDOMAIN
-
-                        // Questions: 1, Answer RRs: 0, Authority RRs: 0, Additional RRs: 0
-                        response.extend_from_slice(&[0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
-
-                        // Repeat the question section
-                        response.extend_from_slice(&buf[12..len]);
-
-                        if let Err(e) = socket.send_to(&response, &addr).await {
+                        if let Err(e) = send_nxdomain_response(transaction_id, &buf, buf.len(), &addr, &socket).await {
                             eprintln!("Failed to send NXDOMAIN response: {}", e);
                         } else {
                             println!("Sent NXDOMAIN response to {}", addr);

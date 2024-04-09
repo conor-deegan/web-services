@@ -1,14 +1,22 @@
-use tokio::net::UdpSocket;
-use std::{error::Error, net::Ipv4Addr};
 use clap::Parser;
-use reqwest::{Method, header::{HeaderMap, HeaderName, HeaderValue}};
+use reqwest::{
+    header::{HeaderMap, HeaderName, HeaderValue},
+    Method,
+};
+use std::{error::Error, net::Ipv4Addr};
+use tokio::net::UdpSocket;
 use url::Url;
 
 #[derive(Parser, Debug)]
 #[clap(version = "0.1.0", author = "Conor Deegan")]
 struct Args {
     /// Sets the method for the request
-    #[clap(short = 'X', long = "request", value_name = "METHOD", default_value = "GET")]
+    #[clap(
+        short = 'X',
+        long = "request",
+        value_name = "METHOD",
+        default_value = "GET"
+    )]
     method: String,
 
     /// Sets the HTTP request headers
@@ -69,7 +77,9 @@ async fn query_dns_resolver(domain: &str) -> Result<Ipv4Addr, Box<dyn Error>> {
 
 fn extract_host(url_str: &str) -> Result<String, &'static str> {
     let url = Url::parse(url_str).map_err(|_| "Failed to parse URL")?;
-    url.host_str().map(|s| s.to_string()).ok_or("URL does not contain a host")
+    url.host_str()
+        .map(|s| s.to_string())
+        .ok_or("URL does not contain a host")
 }
 
 fn replace_host_with_ip(url_str: &str, ip: Ipv4Addr) -> String {
@@ -117,7 +127,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Send the HTTP request
     let client = reqwest::Client::new();
     let request = client
-        .request(Method::from_bytes(args.method.as_bytes()).unwrap(), replace_host_with_ip(&args.endpoint, ip))
+        .request(
+            Method::from_bytes(args.method.as_bytes()).unwrap(),
+            replace_host_with_ip(&args.endpoint, ip),
+        )
         .headers(headers.clone())
         .body(args.data.clone().unwrap_or_default());
 

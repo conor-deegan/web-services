@@ -2,11 +2,11 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use clap::Parser;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use serde::{Deserialize, Serialize};
-use clap::Parser;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct Spell {
@@ -88,8 +88,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(axum::extract::Extension(spells));
 
     // Start the server
-    let listener = tokio::net::TcpListener::bind(format!("{}:{}", config.host, config.port))
-        .await?;
+    let listener =
+        tokio::net::TcpListener::bind(format!("{}:{}", config.host, config.port)).await?;
     println!("Server running on http://{}:{}", config.host, config.port);
     axum::serve(listener, app).await.unwrap();
 

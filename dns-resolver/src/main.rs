@@ -1,8 +1,8 @@
-use tokio::net::UdpSocket;
+use std::collections::HashMap;
 use std::error::Error;
 use std::net::Ipv4Addr;
-use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::net::UdpSocket;
 
 struct CacheEntry {
     ip_address: Ipv4Addr,
@@ -16,13 +16,18 @@ struct DnsCache {
 // simple DNS Cache implementation
 impl DnsCache {
     fn new() -> Self {
-        DnsCache { entries: HashMap::new() }
+        DnsCache {
+            entries: HashMap::new(),
+        }
     }
 
     fn get(&self, domain: &str) -> Option<(Ipv4Addr, u64)> {
         if let Some(entry) = self.entries.get(domain) {
             // Check if the entry is still valid
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
             if entry.valid_until > now {
                 return Some((entry.ip_address, entry.valid_until));
             }
@@ -31,13 +36,28 @@ impl DnsCache {
     }
 
     fn insert(&mut self, domain: &str, ip_address: Ipv4Addr, ttl: u32) {
-        let valid_until = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + u64::from(ttl);
-        self.entries.insert(domain.to_string(), CacheEntry { ip_address, valid_until });
+        let valid_until = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + u64::from(ttl);
+        self.entries.insert(
+            domain.to_string(),
+            CacheEntry {
+                ip_address,
+                valid_until,
+            },
+        );
     }
 }
 
 // Construct a DNS response given a domain name, its resolved IP address, and TTL.
-fn create_dns_response(transaction_id: [u8; 2], domain: &str, ip_address: Ipv4Addr, ttl: u32) -> Vec<u8> {
+fn create_dns_response(
+    transaction_id: [u8; 2],
+    domain: &str,
+    ip_address: Ipv4Addr,
+    ttl: u32,
+) -> Vec<u8> {
     let mut response = Vec::new();
     let ip_bytes = ip_address.octets();
     let ttl_bytes = ttl.to_be_bytes(); // Convert TTL to byte array in big-endian format
@@ -174,7 +194,10 @@ async fn send_nxdomain_response(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let resolver_socket = UdpSocket::bind("0.0.0.0:5354").await?;
-    println!("DNS Resolver listening on {}", resolver_socket.local_addr()?);
+    println!(
+        "DNS Resolver listening on {}",
+        resolver_socket.local_addr()?
+    );
 
     let mut cache = DnsCache::new();
 
@@ -186,48 +209,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         match parse_domain_name(&request, 12) {
             Ok(domain) => {
-                 println!("Parsed domain: {}", domain);
+                println!("Parsed domain: {}", domain);
 
-                 // Check if the domain is in the cache
-                 if let Some((ip_address, ttl)) = cache.get(&domain) {
-                      // Send the cached IP address to the client
-                      println!("Cache hit: {} -> {}", domain, ip_address);
-                      let transaction_id = [request[0], request[1]];
-                      let ttl_u32 = ttl as u32; // Convert u16 to u32
-                      let response = create_dns_response(transaction_id, &domain, ip_address, ttl_u32);
-                      if let Err(e) = resolver_socket.send_to(&response, &client_addr).await {
-                          eprintln!("Failed to send response: {}", e);
-                      } else {
-                          println!("Sent response to {} for domain {} and ip {}", client_addr, domain, ip_address);
-                      }
-                  } else {
-                      // Query the authoritative server for the IP address
-                      match query_authoritative_server(&domain).await {
-                          Ok((ip_address, ttl)) => {
-                              println!("Cache miss: {} -> {} {}", domain, ip_address, ttl);
-                              // Insert the domain and IP address into the cache
-                              cache.insert(&domain, ip_address, ttl);
+                // Check if the domain is in the cache
+                if let Some((ip_address, ttl)) = cache.get(&domain) {
+                    // Send the cached IP address to the client
+                    println!("Cache hit: {} -> {}", domain, ip_address);
+                    let transaction_id = [request[0], request[1]];
+                    let ttl_u32 = ttl as u32; // Convert u16 to u32
+                    let response =
+                        create_dns_response(transaction_id, &domain, ip_address, ttl_u32);
+                    if let Err(e) = resolver_socket.send_to(&response, &client_addr).await {
+                        eprintln!("Failed to send response: {}", e);
+                    } else {
+                        println!(
+                            "Sent response to {} for domain {} and ip {}",
+                            client_addr, domain, ip_address
+                        );
+                    }
+                } else {
+                    // Query the authoritative server for the IP address
+                    match query_authoritative_server(&domain).await {
+                        Ok((ip_address, ttl)) => {
+                            println!("Cache miss: {} -> {} {}", domain, ip_address, ttl);
+                            // Insert the domain and IP address into the cache
+                            cache.insert(&domain, ip_address, ttl);
 
-                              let transaction_id = [request[0], request[1]];
-                              let response = create_dns_response(transaction_id, &domain, ip_address, ttl);
-                              if let Err(e) = resolver_socket.send_to(&response, &client_addr).await {
-                                  eprintln!("Failed to send response: {}", e);
-                              } else {
-                                  println!("Sent response to {} for domain {} and ip {}", client_addr, domain, ip_address);
-                              }
-                          },
-                          Err(_e) => {
-                              // Send a NXDOMAIN response to the client
-                              let transaction_id = [request[0], request[1]];
-                              if let Err(e) = send_nxdomain_response(transaction_id, &request, request.len(), &client_addr, &resolver_socket).await {
-                                  eprintln!("Failed to send NXDOMAIN response: {}", e);
-                              } else {
-                                  println!("Sent NXDOMAIN response to {}", client_addr);
-                              }
-                          }
-                      }
-                  }
-            },
+                            let transaction_id = [request[0], request[1]];
+                            let response =
+                                create_dns_response(transaction_id, &domain, ip_address, ttl);
+                            if let Err(e) = resolver_socket.send_to(&response, &client_addr).await {
+                                eprintln!("Failed to send response: {}", e);
+                            } else {
+                                println!(
+                                    "Sent response to {} for domain {} and ip {}",
+                                    client_addr, domain, ip_address
+                                );
+                            }
+                        }
+                        Err(_e) => {
+                            // Send a NXDOMAIN response to the client
+                            let transaction_id = [request[0], request[1]];
+                            if let Err(e) = send_nxdomain_response(
+                                transaction_id,
+                                &request,
+                                request.len(),
+                                &client_addr,
+                                &resolver_socket,
+                            )
+                            .await
+                            {
+                                eprintln!("Failed to send NXDOMAIN response: {}", e);
+                            } else {
+                                println!("Sent NXDOMAIN response to {}", client_addr);
+                            }
+                        }
+                    }
+                }
+            }
             Err(e) => eprintln!("Failed to parse domain name: {}", e),
         }
     }

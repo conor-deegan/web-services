@@ -1,12 +1,14 @@
-use tokio::net::UdpSocket;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead, Error};
-use std::path::Path;
 use std::net::Ipv4Addr;
+use std::path::Path;
+use tokio::net::UdpSocket;
 
 // Load A records (domain to IP mappings) and their TTLs from a specified file.
-async fn load_a_records_from_file(file_path: &Path) -> io::Result<HashMap<String, (Ipv4Addr, u32)>> {
+async fn load_a_records_from_file(
+    file_path: &Path,
+) -> io::Result<HashMap<String, (Ipv4Addr, u32)>> {
     let file = File::open(file_path)?;
     let buf = io::BufReader::new(file);
     let mut a_records = HashMap::new();
@@ -20,8 +22,12 @@ async fn load_a_records_from_file(file_path: &Path) -> io::Result<HashMap<String
             let rest: Vec<&str> = parts[1].split(',').collect();
             if rest.len() == 2 {
                 // Converting string IP to Ipv4Addr and string TTL to u32.
-                let ip_address = rest[0].parse().map_err(|_| Error::new(io::ErrorKind::InvalidData, "Invalid IP address"))?;
-                let ttl = rest[1].parse().map_err(|_| Error::new(io::ErrorKind::InvalidData, "Invalid TTL"))?;
+                let ip_address = rest[0]
+                    .parse()
+                    .map_err(|_| Error::new(io::ErrorKind::InvalidData, "Invalid IP address"))?;
+                let ttl = rest[1]
+                    .parse()
+                    .map_err(|_| Error::new(io::ErrorKind::InvalidData, "Invalid TTL"))?;
                 // Storing the parsed data in a HashMap.
                 a_records.insert(domain.to_string(), (ip_address, ttl));
             }
@@ -32,7 +38,12 @@ async fn load_a_records_from_file(file_path: &Path) -> io::Result<HashMap<String
 }
 
 // Construct a DNS response given a domain name, its resolved IP address, and TTL.
-fn create_dns_response(transaction_id: [u8; 2], domain: &str, ip_address: Ipv4Addr, ttl: u32) -> Vec<u8> {
+fn create_dns_response(
+    transaction_id: [u8; 2],
+    domain: &str,
+    ip_address: Ipv4Addr,
+    ttl: u32,
+) -> Vec<u8> {
     let mut response = Vec::new();
     let ip_bytes = ip_address.octets();
     let ttl_bytes = ttl.to_be_bytes(); // Convert TTL to byte array in big-endian format
@@ -116,7 +127,6 @@ async fn send_nxdomain_response(
     Ok(())
 }
 
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load the A records from "src/domain.txt".
@@ -132,31 +142,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (_, addr) = socket.recv_from(&mut buf).await?;
         println!("Received query from {}", addr);
 
-        match parse_domain_name(&buf, 12) { // Start parsing after the header
+        match parse_domain_name(&buf, 12) {
+            // Start parsing after the header
             Ok(domain) => {
                 println!("Parsed domain: {}", domain);
                 match a_records.get(&domain) {
                     Some((ip_address, ttl)) => {
                         let transaction_id = [buf[0], buf[1]];
-                        let response = create_dns_response(transaction_id, &domain, *ip_address, *ttl);
+                        let response =
+                            create_dns_response(transaction_id, &domain, *ip_address, *ttl);
                         if let Err(e) = socket.send_to(&response, &addr).await {
                             eprintln!("Failed to send response: {}", e);
                         } else {
-                            println!("Sent response to {} for domain {} and ip {}", addr, domain, ip_address);
+                            println!(
+                                "Sent response to {} for domain {} and ip {}",
+                                addr, domain, ip_address
+                            );
                         }
-                    },
+                    }
                     None => {
                         let transaction_id = [buf[0], buf[1]];
-                        if let Err(e) = send_nxdomain_response(transaction_id, &buf, buf.len(), &addr, &socket).await {
+                        if let Err(e) =
+                            send_nxdomain_response(transaction_id, &buf, buf.len(), &addr, &socket)
+                                .await
+                        {
                             eprintln!("Failed to send NXDOMAIN response: {}", e);
                         } else {
                             println!("Sent NXDOMAIN response to {}", addr);
                         }
                     }
                 }
-            },
+            }
             Err(e) => eprintln!("Failed to parse domain name: {}", e),
         }
     }
-
 }

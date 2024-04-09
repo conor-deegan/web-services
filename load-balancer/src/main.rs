@@ -1,11 +1,11 @@
-use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{self, AsyncWriteExt};
-use tokio::time::{self, Duration};
-use tokio::fs;
-use serde::Deserialize;
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
 use reqwest::Client;
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use tokio::fs;
+use tokio::io::{self, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::time::{self, Duration};
 
 #[derive(Deserialize)]
 struct Config {
@@ -18,8 +18,10 @@ struct Targets {
     health_check_endpoint: String,
 }
 
-async fn handle_connection(mut incoming: TcpStream, backend_address: String) -> Result<(), Box<dyn std::error::Error>> {
-
+async fn handle_connection(
+    mut incoming: TcpStream,
+    backend_address: String,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("Forwarding connection to backend: {}", backend_address);
 
     let mut backend = TcpStream::connect(backend_address).await?;
@@ -33,13 +35,17 @@ async fn handle_connection(mut incoming: TcpStream, backend_address: String) -> 
     Ok(())
 }
 
-async fn check_targets_health(target_health: Arc<Mutex<HashMap<Targets, bool>>>, targets: Vec<Targets>) {
+async fn check_targets_health(
+    target_health: Arc<Mutex<HashMap<Targets, bool>>>,
+    targets: Vec<Targets>,
+) {
     let client = Client::new();
 
     for target in &targets {
         let health_check_url = format!("http://{}{}", target.address, target.health_check_endpoint);
 
-        let health = client.get(&health_check_url)
+        let health = client
+            .get(&health_check_url)
             .send()
             .await
             .map(|resp| resp.status().is_success())
@@ -50,10 +56,21 @@ async fn check_targets_health(target_health: Arc<Mutex<HashMap<Targets, bool>>>,
     }
 
     // Print the number of healthy targets
-    println!("Healthy targets: {:?}", target_health.lock().unwrap().iter().filter(|(_, &v)| v).count());
+    println!(
+        "Healthy targets: {:?}",
+        target_health
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, &v)| v)
+            .count()
+    );
 }
 
-async fn write_flush_shutdown(mut socket: tokio::net::TcpStream, response: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+async fn write_flush_shutdown(
+    mut socket: tokio::net::TcpStream,
+    response: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
     socket.write_all(response).await?;
     socket.flush().await?;
     socket.shutdown().await?;
@@ -62,7 +79,6 @@ async fn write_flush_shutdown(mut socket: tokio::net::TcpStream, response: &[u8]
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-
     // read the config file
     let config_str = fs::read_to_string("src/config.toml").await?;
     let Config { targets } = toml::from_str(&config_str)?;
@@ -99,7 +115,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(async move {
             let healthy_backends = {
                 let locked_health = targets_health_clone.lock().unwrap();
-                targets_clone.iter().filter(|b| *locked_health.get(b).unwrap()).collect::<Vec<_>>()
+                targets_clone
+                    .iter()
+                    .filter(|b| *locked_health.get(b).unwrap())
+                    .collect::<Vec<_>>()
             }; // Lock is dropped here as it goes out of scope.
 
             if !healthy_backends.is_empty() {

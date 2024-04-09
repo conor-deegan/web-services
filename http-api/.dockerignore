@@ -1,0 +1,7 @@
+/target
+**/*.lock
+**/target
+/.git
+/.github
+**/node_modules
+**/*.rs.bk

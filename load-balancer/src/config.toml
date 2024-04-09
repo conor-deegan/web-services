@@ -1,0 +1,7 @@
+[[targets]]
+address = "http-api-1:8001"
+health_check_endpoint = "/healthz"
+
+[[targets]]
+address = "http-api-2:8001"
+health_check_endpoint = "/healthz"

@@ -94,7 +94,7 @@ fn parse_domain_name(buf: &[u8], start: usize) -> Result<String, &'static str> {
 // Query the authoritative DNS server for the IP address of a domain if not found in the cache.
 async fn query_authoritative_server(domain: &str) -> Result<(Ipv4Addr, u32), Box<dyn Error>> {
     // Connect to the authoritative DNS server
-    let server_addr = "0.0.0.0:53";
+    let server_addr = "dns-server:53";
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
     socket.connect(server_addr).await?;
 
@@ -135,6 +135,8 @@ async fn query_authoritative_server(domain: &str) -> Result<(Ipv4Addr, u32), Box
     // TTL is 6 bytes before the IP address in the answer
     let ttl_bytes = &response[ip_start - 6..ip_start - 2];
     let ttl = u32::from_be_bytes(ttl_bytes.try_into()?);
+
+    println!("Resolved {} to {} with TTL {}", domain, ip_address, ttl);
 
     Ok((ip_address, ttl))
 }

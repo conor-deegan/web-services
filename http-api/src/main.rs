@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use clap::Parser;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct Spell {
     id: u32,
     name: String,
@@ -39,6 +39,7 @@ fn sample_spells() -> HashMap<u32, Spell> {
 }
 
 async fn get_all_spells(spells: axum::extract::Extension<Spells>) -> Json<Vec<Spell>> {
+    println!("Getting all spells");
     let spells = spells.lock().await;
     Json(spells.values().cloned().collect())
 }
@@ -47,6 +48,7 @@ async fn get_spell_by_id(
     id: axum::extract::Path<u32>,
     spells: axum::extract::Extension<Spells>,
 ) -> Result<Json<Spell>, axum::http::StatusCode> {
+    println!("Getting spell by id: {}", id.0);
     let spells = spells.lock().await;
     match spells.get(&id.0) {
         Some(spell) => Ok(Json(spell.clone())),
@@ -58,6 +60,7 @@ async fn create_spell(
     axum::extract::Extension(spells): axum::extract::Extension<Spells>,
     Json(spell): Json<Spell>,
 ) -> Json<Spell> {
+    println!("Creating spell: {:?}", spell);
     let mut spells = spells.lock().await;
     spells.insert(spell.id, spell.clone());
     Json(spell)
@@ -65,10 +68,10 @@ async fn create_spell(
 
 #[derive(Parser)]
 pub struct Config {
-    #[arg(short = 'H', long, default_value = "127.0.0.1")]
+    #[arg(short = 'H', long, default_value = "0.0.0.0")]
     pub host: String,
 
-    #[arg(short, long, default_value_t = 3000)]
+    #[arg(short, long, default_value_t = 8001)]
     pub port: u16,
 }
 
@@ -81,6 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/spells", get(get_all_spells))
         .route("/api/spells", post(create_spell))
         .route("/api/spells/:id", get(get_spell_by_id))
+        .route("/healthz", get(|| async { "OK" }))
         .layer(axum::extract::Extension(spells));
 
     // Start the server

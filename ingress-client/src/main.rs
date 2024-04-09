@@ -27,8 +27,8 @@ struct Args {
 // Query the DNS resolver for the IP address of a domain
 async fn query_dns_resolver(domain: &str) -> Result<Ipv4Addr, Box<dyn Error>> {
     // Connect to the DNS resolver
-    let resolver_addr = "0.0.0.0:5354";
-    let socket = UdpSocket::bind("0.0.0.0:0").await?;
+    let resolver_addr = "127.0.0.1:5354";
+    let socket = UdpSocket::bind("127.0.0.1:0").await?;
     socket.connect(resolver_addr).await?;
 
     // Construct the DNS query message
@@ -84,6 +84,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Extract the host from the URL
     let host = extract_host(&args.endpoint)?;
+
+    // Print the host
+    println!("Host: {}", host);
 
     // Query the DNS resolver for the IP address of the host
     let ip = query_dns_resolver(&host).await?;

@@ -1,0 +1,50 @@
+version: '3.8'
+services:
+  dns-server:
+    build: ./dns-server
+    ports:
+      - "53:53/udp"
+    volumes:
+      - ./dns-server:/usr/src/myapp # This ensures changes in your source are reflected in the container
+    networks:
+      - local-network
+
+  dns-resolver:
+    build: ./dns-resolver
+    ports:
+      - "5354:5354/udp"
+    volumes:
+      - ./dns-resolver:/usr/src/myapp # This ensures changes in your source are reflected in the container
+    networks:
+      - local-network
+
+  http-api-1:
+    build: ./http-api
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./http-api:/usr/src/myapp # This ensures changes in your source are reflected in the container
+    networks:
+      - local-network
+
+  http-api-2:
+    build: ./http-api
+    ports:
+      - "8002:8001"
+    volumes:
+      - ./http-api:/usr/src/myapp # This ensures changes in your source are reflected in the container
+    networks:
+      - local-network
+
+  load-balancer:
+    build: ./load-balancer
+    ports:
+      - "80:80"
+    volumes:
+      - ./load-balancer:/usr/src/myapp # This ensures changes in your source are reflected in the container
+    networks:
+      - local-network
+
+networks:
+  local-network:
+    driver: bridge

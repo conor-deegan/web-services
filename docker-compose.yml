@@ -5,7 +5,7 @@ services:
     ports:
       - "53:53/udp"
     volumes:
-      - ./dns-server:/usr/src/myapp # This ensures changes in your source are reflected in the container
+      - ./dns-server:/usr/src/myapp
     networks:
       - local-network
 
@@ -14,7 +14,7 @@ services:
     ports:
       - "5354:5354/udp"
     volumes:
-      - ./dns-resolver:/usr/src/myapp # This ensures changes in your source are reflected in the container
+      - ./dns-resolver:/usr/src/myapp
     networks:
       - local-network
 
@@ -23,7 +23,7 @@ services:
     ports:
       - "8001:8001"
     volumes:
-      - ./http-api:/usr/src/myapp # This ensures changes in your source are reflected in the container
+      - ./http-api:/usr/src/myapp
     networks:
       - local-network
 
@@ -32,7 +32,7 @@ services:
     ports:
       - "8002:8001"
     volumes:
-      - ./http-api:/usr/src/myapp # This ensures changes in your source are reflected in the container
+      - ./http-api:/usr/src/myapp
     networks:
       - local-network
 
@@ -41,7 +41,16 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ./load-balancer:/usr/src/myapp # This ensures changes in your source are reflected in the container
+      - ./load-balancer:/usr/src/myapp
+    networks:
+      - local-network
+
+  data-store:
+    build: ./data-store
+    ports:
+      - "8004:8004"
+    volumes:
+      - ./data-store:/usr/src/myapp
     networks:
       - local-network
 

@@ -49,8 +49,6 @@ services:
     build: ./data-store
     ports:
       - "8004:8004"
-    volumes:
-      - ./data-store:/usr/src/myapp
     networks:
       - local-network
 

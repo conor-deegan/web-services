@@ -1,0 +1,4 @@
+[
+    { "id": 1, "name": "Accio", "description": "Summons an object" },
+    { "id": 2, "name": "Lumos", "description": "Creates light" }
+]

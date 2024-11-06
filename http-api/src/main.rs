@@ -4,7 +4,7 @@ use axum::{
 };
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncWriteExt, AsyncReadExt};
+use tokio::io::{AsyncWriteExt, BufReader, AsyncBufReadExt};
 use tokio::net::TcpStream;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -14,6 +14,11 @@ struct Spell {
     id: u32,
     name: String,
     description: String,
+}
+
+#[derive(Deserialize)]
+struct ErrorResponse {
+    error: String,
 }
 
 #[derive(Clone)]
@@ -41,36 +46,46 @@ impl Database {
     }
 
     async fn execute(&self, command: &str) -> Result<String, Box<dyn std::error::Error>> {
-        let command = format!("{}\0", command); // append delimiter to command
-        let mut lock = self.connection.lock().await;
-        lock.write_all(command.as_bytes()).await?;
+        // Lock the connection to ensure only one command is sent at a time
+        let mut connection = self.connection.lock().await;
+
+        // Send command
+        connection.write_all(command.as_bytes()).await?;
+        connection.flush().await?;
+
+        // Wait for the response, reading up to newline
+        let mut reader = BufReader::new(&mut *connection);
         let mut response = Vec::new();
-        let mut buffer = [0; 1024];
-        let delimiter = b'\0'; // Null byte as delimiter
 
-        loop {
-            let n = lock.read(&mut buffer).await?;
-            if n == 0 || buffer[..n].contains(&delimiter) {
-                break;
-            } // End of message or stream
-            response.extend_from_slice(&buffer[..n]);
-        }
-        // Remove the delimiter from the response if present
-        if let Some(pos) = response.iter().position(|&x| x == delimiter) {
-            response.truncate(pos);
-        }
+        reader.read_until(b'\n', &mut response).await?;
 
-        // Convert the response to a string
-        let response = String::from_utf8(response)?;
-        Ok(response)
+        // Convert the response from Vec<u8> to a String and trim it
+        let response_str = String::from_utf8(response)?.trim().to_string();
+
+        Ok(response_str)
     }
 }
 
-async fn get_all_spells(db: axum::extract::Extension<Arc<Mutex<Database>>>,) -> Result<Json<Vec<Spell>>, axum::http::StatusCode> {
-    let res = db.lock().await.execute("SELECT * FROM spells").await;
-    match res {
+async fn get_all_spells(
+    db: axum::extract::Extension<Arc<Mutex<Database>>>,
+) -> Result<Json<Vec<Spell>>, axum::http::StatusCode> {
+    // Lock the database connection and execute the command
+    let result = db.lock().await.execute("SELECT * FROM spells").await;
+
+    match result {
         Ok(response) => {
-            let spells: Vec<Spell> = serde_json::from_str(&response).unwrap();
+            // Attempt to parse the response as an ErrorResponse first
+            if let Ok(error_response) = serde_json::from_str::<ErrorResponse>(&response) {
+                eprintln!("Error from database: {}", error_response.error);
+                return Err(axum::http::StatusCode::BAD_REQUEST);
+            }
+
+            // Otherwise, parse the response as a list of spells
+            let spells: Vec<Spell> = serde_json::from_str(&response).map_err(|e| {
+                eprintln!("Failed to parse spells: {}", e);
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+            println!("Got all spells: {:?}", spells);
             Ok(Json(spells))
         }
         Err(e) => {
@@ -81,15 +96,33 @@ async fn get_all_spells(db: axum::extract::Extension<Arc<Mutex<Database>>>,) -> 
 }
 
 async fn get_spell_by_id(
-    id: axum::extract::Path<u32>,
     db: axum::extract::Extension<Arc<Mutex<Database>>>,
+    axum::extract::Path(id): axum::extract::Path<u32>,
 ) -> Result<Json<Spell>, axum::http::StatusCode> {
-    println!("Getting spell by id: {}", id.0);
-    let res = db.lock().await.execute(&format!("SELECT * FROM spells WHERE id = {}", id.0)).await;
-    match res {
+    // Lock the database connection and execute the command
+    let result = db.lock().await.execute(&format!("SELECT * FROM spells WHERE id = {}", id)).await;
+
+    match result {
         Ok(response) => {
-            let spell: Spell = serde_json::from_str(&response).unwrap();
-            Ok(Json(spell))
+            // Attempt to parse the response as an ErrorResponse first
+            if let Ok(error_response) = serde_json::from_str::<ErrorResponse>(&response) {
+                eprintln!("Error from database: {}", error_response.error);
+                return Err(axum::http::StatusCode::BAD_REQUEST);
+            }
+
+            // Otherwise, parse the response as a list of spell
+            let spells: Vec<Spell> = serde_json::from_str(&response).map_err(|e| {
+                eprintln!("Failed to parse spells: {}", e);
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+            // Ensure only one spell was returned
+            if spells.len() != 1 {
+                eprintln!("Expected 1 spell, got {}", spells.len());
+                return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+            }
+            println!("Got spell by id: {:?}", spells[0]);
+            Ok(Json(spells[0].clone()))
         }
         Err(e) => {
             eprintln!("Failed to get spell by id: {}", e);
@@ -101,21 +134,26 @@ async fn get_spell_by_id(
 async fn create_spell(
     db: axum::extract::Extension<Arc<Mutex<Database>>>,
     Json(spell): Json<Spell>,
-) -> Json<Spell> {
-    println!("Creating spell: {:?}", spell);
-    let res = db.lock().await.execute(&format!(
+) -> Result<Json<Spell>, axum::http::StatusCode> {
+    // Lock the database connection and execute the command
+    let result = db.lock().await.execute(&format!(
         "INSERT INTO spells (id, name, description) VALUES ({}, '{}', '{}')",
         spell.id, spell.name, spell.description
     )).await;
-    match res {
-        Ok(_) => Json(spell),
+
+    match result {
+        Ok(response) => {
+            // Attempt to parse the response as an ErrorResponse first
+            if let Ok(error_response) = serde_json::from_str::<ErrorResponse>(&response) {
+                eprintln!("Error from database: {}", error_response.error);
+                return Err(axum::http::StatusCode::BAD_REQUEST);
+            }
+            println!("Created spell: {:?}", spell);
+            Ok(Json(spell))
+        }
         Err(e) => {
             eprintln!("Failed to create spell: {}", e);
-            Json(Spell {
-                id: 0,
-                name: "Failed to create spell".to_string(),
-                description: e.to_string(),
-            })
+            Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
 }

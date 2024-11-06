@@ -2,6 +2,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use reqwest::Client;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncWriteExt, BufReader, AsyncBufReadExt};
@@ -22,8 +23,54 @@ struct ErrorResponse {
 }
 
 #[derive(Clone)]
+struct CacheStore {
+    client: Client,
+    base_url: String,
+}
+
+#[derive(Clone)]
 struct Database {
     connection: Arc<Mutex<TcpStream>>,
+}
+
+impl CacheStore {
+    fn new(base_url: &str) -> Self {
+        Self {
+            client: Client::new(),
+            base_url: base_url.to_string(),
+        }
+    }
+
+    // Retrieves a value from the cache store by key
+    async fn get(&self, key: &str) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        let url = format!("{}/get/{}", self.base_url, key);
+        
+        let response = self.client.get(&url).send().await?;
+        
+        // Check if the response is 404, meaning the key doesn't exist
+        if response.status().as_u16() == 404 {
+            return Ok(None); // Key not found in cache
+        }
+
+        // Parse the response as JSON
+        let value = response.text().await?;
+        Ok(Some(value))
+    }
+
+    // Sets a key-value pair in the cache store
+    async fn set(&self, key: &str, value: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let url = format!("{}/set", self.base_url);
+
+        let params = serde_json::json!({ "key": key, "value": value });
+        
+        // best effort, ignore errors
+        self.client.post(&url)
+            .json(&params)
+            .send()
+            .await?;
+
+        Ok(())
+    }
 }
 
 impl Database {
@@ -97,8 +144,23 @@ async fn get_all_spells(
 
 async fn get_spell_by_id(
     db: axum::extract::Extension<Arc<Mutex<Database>>>,
+    cache: axum::extract::Extension<Arc<CacheStore>>,
     axum::extract::Path(id): axum::extract::Path<u32>,
 ) -> Result<Json<Spell>, axum::http::StatusCode> {
+
+    // Try to get the spell from the cache first
+    let cached_spell = cache.get(&id.to_string()).await.map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+    if let Some(cached_spell) = cached_spell {
+        println!("Cache hit for spell by id: {}", id);
+        let spell: Spell = serde_json::from_str(&cached_spell).map_err(|e| {
+            eprintln!("Failed to parse cached spell: {}", e);
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        return Ok(Json(spell));
+    }
+
+    println!("Cache miss for spell by id: {}", id);
+
     // Lock the database connection and execute the command
     let result = db.lock().await.execute(&format!("SELECT * FROM spells WHERE id = {}", id)).await;
 
@@ -122,6 +184,17 @@ async fn get_spell_by_id(
                 return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
             }
             println!("Got spell by id: {:?}", spells[0]);
+
+            // Spawn a background task to cache the response; ignore errors from `set`
+            let cache = cache.clone();
+            let spell_id = id.to_string();
+            let spell_data = serde_json::to_string(&spells[0]).unwrap();
+            tokio::spawn(async move {
+                if let Err(e) = cache.set(&spell_id, &spell_data).await {
+                    eprintln!("Failed to cache spell by id: {}, error: {}", spell_id, e);
+                }
+            });
+
             Ok(Json(spells[0].clone()))
         }
         Err(e) => {
@@ -174,12 +247,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to the database over long-lived TCP connection
     let db = Database::new("data-store:8004").await?;
 
+    // Connect to the cache store
+    let cache = CacheStore::new("http://cache-store:8005");
+
     let app = Router::new()
         .route("/api/spells", get(get_all_spells))
         .route("/api/spells", post(create_spell))
         .route("/api/spells/:id", get(get_spell_by_id))
         .route("/healthz", get(|| async { "OK" }))
-        .layer(axum::extract::Extension(Arc::new(Mutex::new(db))));
+        .layer(axum::extract::Extension(Arc::new(Mutex::new(db))))
+        .layer(axum::extract::Extension(Arc::new(cache)));
 
     // Start the server
     let listener =

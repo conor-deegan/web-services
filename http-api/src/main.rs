@@ -29,6 +29,12 @@ struct CacheStore {
 }
 
 #[derive(Clone)]
+struct MessageQueue {
+    client: Client,
+    base_url: String,
+}
+
+#[derive(Clone)]
 struct Database {
     connection: Arc<Mutex<TcpStream>>,
 }
@@ -62,6 +68,30 @@ impl CacheStore {
         let url = format!("{}/set", self.base_url);
 
         let params = serde_json::json!({ "key": key, "value": value });
+        
+        // best effort, ignore errors
+        self.client.post(&url)
+            .json(&params)
+            .send()
+            .await?;
+
+        Ok(())
+    }
+}
+
+impl MessageQueue {
+    fn new(base_url: &str) -> Self {
+        Self {
+            client: Client::new(),
+            base_url: base_url.to_string(),
+        }
+    }
+
+    // Sets a key-value pair in the cache store
+    async fn enqueue(&self, message: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let url = format!("{}/enqueue", self.base_url);
+
+        let params = serde_json::json!({ "message": message });
         
         // best effort, ignore errors
         self.client.post(&url)
@@ -206,6 +236,7 @@ async fn get_spell_by_id(
 
 async fn create_spell(
     db: axum::extract::Extension<Arc<Mutex<Database>>>,
+    message_queue: axum::extract::Extension<Arc<MessageQueue>>,
     Json(spell): Json<Spell>,
 ) -> Result<Json<Spell>, axum::http::StatusCode> {
     // Lock the database connection and execute the command
@@ -222,6 +253,15 @@ async fn create_spell(
                 return Err(axum::http::StatusCode::BAD_REQUEST);
             }
             println!("Created spell: {:?}", spell);
+
+            // Spawn a background task to enqueue the response; ignore errors from `enqueue`
+            let message_queue = message_queue.clone();
+            let spell_data = serde_json::to_string(&spell).unwrap();
+            tokio::spawn(async move {
+                if let Err(e) = message_queue.enqueue(&spell_data).await {
+                    eprintln!("Failed to enqueue spell: {}, error: {}", spell.id, e);
+                }
+            });
             Ok(Json(spell))
         }
         Err(e) => {
@@ -250,13 +290,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to the cache store
     let cache = CacheStore::new("http://cache-store:8005");
 
+    // Connect to the message queue
+    let message_queue = MessageQueue::new("http://message-queue:8006");
+
     let app = Router::new()
         .route("/api/spells", get(get_all_spells))
         .route("/api/spells", post(create_spell))
         .route("/api/spells/:id", get(get_spell_by_id))
         .route("/healthz", get(|| async { "OK" }))
         .layer(axum::extract::Extension(Arc::new(Mutex::new(db))))
-        .layer(axum::extract::Extension(Arc::new(cache)));
+        .layer(axum::extract::Extension(Arc::new(cache)))
+        .layer(axum::extract::Extension(Arc::new(message_queue)));
 
     // Start the server
     let listener =

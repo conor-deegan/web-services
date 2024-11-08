@@ -1,0 +1,36 @@
+{
+    "name": "message-queue",
+    "version": "1.0.0",
+    "description": "A Data Store",
+    "main": "build/server.js",
+    "scripts": {
+        "dev": "nodemon --exec ts-node ./src/server.ts --watch './src/*' --ext .ts,.js",
+        "start": "node ./build/server.js",
+        "build": "rimraf ./build && tsc",
+        "l:c": "eslint \"./**/*.ts\" --config .eslintrc && npm run type-check",
+        "l:f": "eslint \"./**/*.ts\" --fix",
+        "p:c": "prettier --config .prettierrc.js \"./**/*.+(js|json|ts)\" --check --ignore-unknown",
+        "p:f": "prettier --config .prettierrc.js \"./**/*.+(js|json|ts)\" --write --ignore-unknown",
+        "type-check": "tsc --noEmit"
+    },
+    "author": "Conor Deegan",
+    "license": "ISC",
+    "devDependencies": {
+        "@eslint/js": "^9.1.1",
+        "@types/cors": "^2.8.17",
+        "@types/express": "^4.17.21",
+        "@typescript-eslint/eslint-plugin": "^7.8.0",
+        "@typescript-eslint/parser": "^7.8.0",
+        "eslint": "^8.57.0",
+        "eslint-plugin-simple-import-sort": "^12.1.0",
+        "nodemon": "^3.1.2",
+        "prettier": "^3.2.5",
+        "ts-node": "^10.9.2",
+        "typescript": "^5.4.5",
+        "typescript-eslint": "^7.8.0"
+    },
+    "dependencies": {
+        "cors": "^2.8.5",
+        "express": "^4.19.2"
+    }
+}

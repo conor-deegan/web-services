@@ -59,6 +59,13 @@ services:
     networks:
       - local-network
 
+  message-queue:
+    build: ./message-queue
+    ports:
+      - "8006:8006"
+    networks:
+      - local-network
+
 networks:
   local-network:
     driver: bridge

@@ -66,6 +66,13 @@ services:
     networks:
       - local-network
 
+  object-storage:
+    build: ./object-storage
+    ports:
+      - "8007:8007"
+    networks:
+      - local-network
+
 networks:
   local-network:
     driver: bridge

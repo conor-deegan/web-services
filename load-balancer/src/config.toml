@@ -1,3 +1,4 @@
+# Load-balanced targets
 [[targets]]
 address = "http-api-1:8001"
 health_check_endpoint = "/healthz"
@@ -5,3 +6,13 @@ health_check_endpoint = "/healthz"
 [[targets]]
 address = "http-api-2:8001"
 health_check_endpoint = "/healthz"
+
+[[targets]]
+address = "object-storage:8007"
+health_check_endpoint = "/healthz"
+
+# Path-based routing configuration
+# Each entry specifies a path prefix and the address of the service for that path.
+[[path_routes]]
+path = "/files"
+address = "object-storage:8007"

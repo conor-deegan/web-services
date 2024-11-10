@@ -2,8 +2,9 @@ use clap::Parser;
 use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue},
     Method,
+    multipart,
 };
-use std::{error::Error, net::Ipv4Addr};
+use std::{error::Error, net::Ipv4Addr, fs::File, io::Read};
 use tokio::net::UdpSocket;
 use url::Url;
 
@@ -26,6 +27,14 @@ struct Args {
     /// Sets the HTTP request body
     #[clap(short = 'd', long = "data", value_name = "DATA")]
     data: Option<String>,
+
+    /// Sets the file to upload
+    #[clap(short = 'f', long = "file", value_name = "FILE")]
+    file: Option<String>,
+
+    /// Sets additional fields in the form as key=value pairs
+    #[clap(short = 'F', long = "field", value_name = "FIELD")]
+    fields: Vec<String>,
 
     /// Sets the endpoint to request
     #[clap(value_name = "ENDPOINT")]
@@ -123,16 +132,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-
+    
     // Send the HTTP request
     let client = reqwest::Client::new();
-    let request = client
-        .request(
-            Method::from_bytes(args.method.as_bytes()).unwrap(),
-            replace_host_with_ip(&args.endpoint, ip),
-        )
-        .headers(headers.clone())
-        .body(args.data.clone().unwrap_or_default());
+    // Determine if we should send a file or standard body
+    let request = if let Some(file_path) = args.file {
+        // Handle file upload
+        let mut file = File::open(file_path)?;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)?;
+        
+        // Create multipart form with file
+        let mut form = multipart::Form::new()
+            .part("data", multipart::Part::bytes(buffer).file_name("upload_file"));
+
+        // Add dynamic fields from `fields` argument
+        for field in &args.fields {
+            if let Some((key, value)) = field.split_once('=') {
+                println!("Adding field: {}={}", key, value);
+                form = form.text(key.to_string(), value.to_string());
+            } else {
+                eprintln!("Warning: Skipping invalid field '{}'. Expected format 'key=value'", field);
+            }
+        }
+        
+        client
+            .request(
+                Method::from_bytes(args.method.as_bytes()).unwrap(),
+                replace_host_with_ip(&args.endpoint, ip),
+            )
+            .headers(headers.clone())
+            .multipart(form)
+    } else {
+        // Handle non-file body
+        client
+            .request(
+                Method::from_bytes(args.method.as_bytes()).unwrap(),
+                replace_host_with_ip(&args.endpoint, ip),
+            )
+            .headers(headers.clone())
+            .body(args.data.clone().unwrap_or_default())
+    };
 
     println!("Requesting: {}", args.endpoint);
     println!("Method: {}", args.method);
